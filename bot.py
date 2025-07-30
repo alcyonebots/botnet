@@ -132,7 +132,6 @@ async def reason_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", help_command))
     app.add_handler(CommandHandler("help", help_command))
@@ -148,5 +147,6 @@ async def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
 if __name__ == "__main__":
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
     print("🤖 Reporting Bot is running...")
     app.run_polling()
