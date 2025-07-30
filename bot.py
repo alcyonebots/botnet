@@ -149,8 +149,12 @@ async def main():
 
     print("🤖 Reporting Bot is running...")
     await app.run_polling()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
     
+if __name__ == "__main__":
+    try:
+        asyncio.get_event_loop().run_until_complete(main())
+    except RuntimeError:
+        # Already running loop fallback (rare on typical VPS, common with uvicorn, notebooks)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(main())
