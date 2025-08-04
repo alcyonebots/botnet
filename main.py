@@ -1,175 +1,234 @@
-# main.py — MASSACRES BOTNET FINAL VERSION
-import os, zipfile, random, asyncio, re, socks
-from colorama import Fore, Style, init
+import asyncio
+import logging
+import os
+import glob
 from telethon import TelegramClient
-from telethon.errors import FloodWaitError, PeerIdInvalidError
-from telethon.tl.functions.messages import ReportRequest
 from telethon.tl.functions.account import ReportPeerRequest
+from telethon.tl.functions.messages import ReportRequest
 from telethon.tl.types import (
-    InputReportReasonSpam, InputReportReasonViolence,
-    InputReportReasonPornography, InputReportReasonChildAbuse,
-    InputReportReasonCopyright, InputReportReasonFake,
-    InputReportReasonOther
+    InputReportReasonSpam,
+    InputReportReasonViolence,
+    InputReportReasonPornography,
+    InputReportReasonChildAbuse,
+    InputReportReasonCopyright,
+    InputReportReasonFake,
+    InputReportReasonOther,
 )
+import socks
 
-# Init terminal colors
-init(autoreset=True)
+# Logging setup
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
-# === CONFIG ===
-API_ID    = 29872536
-API_HASH  = '65e1f714a47c0879734553dc460e98d6'
-SESSION_ZIP = 'sessions.zip'
-PROXY_TXT = 'proxy.txt'
+API_ID = "29872536"
+API_HASH = "65e1f714a47c0879734553dc460e98d6"
 
-REASONS = {
+# Directory containing session files
+SESSIONS_DIR = "sessions"
+
+# Reasons for reporting
+REPORT_REASONS = {
     "spam": InputReportReasonSpam(),
     "violence": InputReportReasonViolence(),
     "pornography": InputReportReasonPornography(),
-    "child_abuse": InputReportReasonChildAbuse(),
-    "copyright": InputReportReasonCopyright(),
-    "fake": InputReportReasonFake(),
+    "child abuse": InputReportReasonChildAbuse(),
+    "copyright infringement": InputReportReasonCopyright(),
+    "scam": InputReportReasonFake(),
     "other": InputReportReasonOther(),
 }
 
-def banner():
-    print(Fore.RED + Style.BRIGHT + "\n" + "#"*60)
-    print(Fore.YELLOW + "         MASSACRES BOTNET - Multi-Account Tool")
-    print(Fore.RED + Style.BRIGHT + "#"*60 + "\n")
 
-def extract_sessions(zip_file):
-    os.makedirs("sessions_tmp", exist_ok=True)
-    sessions = []
-    with zipfile.ZipFile(zip_file) as z:
-        z.extractall("sessions_tmp")
-    for f in os.listdir("sessions_tmp"):
-        if f.endswith(".session"):
-            sessions.append(os.path.join("sessions_tmp", f))
-    return sessions
-
-def load_proxies():
-    proxies = []
-    if os.path.exists(PROXY_TXT):
-        with open(PROXY_TXT) as f:
-            for line in f:
-                parts = line.strip().split(',')
-                if len(parts) == 2:
-                    proxies.append((socks.SOCKS5, parts[0], int(parts[1]), True, None, None))
-                elif len(parts) == 4:
-                    proxies.append((socks.SOCKS5, parts[0], int(parts[1]), True, parts[2], parts[3]))
-    return proxies
-
-def parse_msg_link(link):
-    match = re.search(r"t\.me/(c|s)?/([-_A-Za-z0-9]+)/(\d+)", link)
-    if not match:
-        match = re.search(r"t\.me/([-_A-Za-z0-9]+)/(\d+)", link)
-    if match:
-        if match.lastindex >= 2:
-            return match.group(2), int(match.group(3))
-    return None, None
-
-async def send_report(client, entity, reason, msg, msg_id=None):
+def load_socks5_proxies(file_path="proxy.txt"):
+    """Load SOCKS5 proxies from a file."""
     try:
-        target = await client.get_input_entity(entity)
-        if msg_id:
-            result = await client(ReportRequest(peer=target, id=[msg_id], reason=reason, message=msg))
-        else:
-            result = await client(ReportPeerRequest(peer=target, reason=reason, message=msg))
-        return getattr(result, 'value', False)
-    except FloodWaitError as e:
-        print(Fore.YELLOW + f"⚠️ FloodWait: {e.seconds}s")
-        return "flood"
-    except PeerIdInvalidError:
-        print(Fore.RED + "❌ Invalid entity or link.")
-        return False
-    except Exception as e:
-        print(Fore.RED + f"❌ Error: {e}")
-        return False
+        with open(file_path, "r") as f:
+            proxies = []
+            for line in f.readlines():
+                if line.strip():
+                    parts = line.strip().split(":")
+                    if len(parts) >= 2:
+                        # Format: host:port or host:port:username:password
+                        host = parts[0]
+                        port = int(parts[1])
+                        username = parts[2] if len(parts) > 2 else None
+                        password = parts[3] if len(parts) > 3 else None
+                        proxies.append((host, port, username, password))
+        return proxies
+    except FileNotFoundError:
+        logger.error(f"Proxy file '{file_path}' not found.")
+        return []
 
-async def main_menu():
-    banner()
 
-    if not os.path.exists(SESSION_ZIP):
-        print(Fore.RED + f"[!] {SESSION_ZIP} not found.")
-        return
+def get_session_files():
+    """Get all .session files from the sessions directory."""
+    if not os.path.exists(SESSIONS_DIR):
+        logger.error(f"Sessions directory '{SESSIONS_DIR}' not found.")
+        return []
+    
+    session_files = glob.glob(os.path.join(SESSIONS_DIR, "*.session"))
+    logger.info(f"Found {len(session_files)} session files in '{SESSIONS_DIR}' directory")
+    return session_files
 
-    sessions = extract_sessions(SESSION_ZIP)
-    proxies = load_proxies()
 
-    print(Fore.CYAN    + f"🔐 Loaded sessions: {len(sessions)}")
-    print(Fore.MAGENTA + f"🌐 Loaded proxies:  {len(proxies)}\n")
-
-    # Target amount
-    report_per_session = input(Fore.GREEN + "💣 How many reports per session? ").strip()
-    while not report_per_session.isdigit() or int(report_per_session) < 1:
-        report_per_session = input("Enter a valid number: ").strip()
-    report_per_session = int(report_per_session)
-
-    # Report type
-    print("\n🧭 What do you want to report?")
-    print("1. Telegram User")
-    print("2. Channel")
-    print("3. Group")
-    print("4. Specific Message")
-    choice = input("🟢 Choice (1-4): ").strip()
-
-    entity = ""
-    msg_id = None
-
-    # Get target
-    if choice == "4":
-        msg_link = input("🔗 Enter full message link (public/private): ").strip()
-        entity, msg_id = parse_msg_link(msg_link)
-        if not entity:
-            print(Fore.RED + "❌ Invalid message link. Aborting.")
-            return
-    else:
-        entity = input("🔗 Enter username, ID or invite link: ").strip()
-
-    print("\n📚 Available reasons:")
-    for i, k in enumerate(REASONS.keys(), 1):
-        print(Fore.YELLOW + f"{i}. {k}")
-    while True:
-        r = input("➡ Select reason number: ").strip()
-        if r.isdigit() and 1 <= int(r) <= len(REASONS):
-            reason = list(REASONS.values())[int(r) - 1]
-            reason_text = list(REASONS.keys())[int(r) - 1]
-            break
-
-    msg_text = input("📝 Enter report message: ").strip()
-    print(Fore.CYAN + "\n🚀 Launching reports...\n")
-
-    success, failed, flood = 0, 0, 0
-    for idx, session_path in enumerate(sessions, 1):
-        proxy = random.choice(proxies) if proxies else None
-        client = TelegramClient(session_path, API_ID, API_HASH, proxy=proxy)
-        try:
-            await client.connect()
-            name = os.path.basename(session_path)
-            for rpt in range(report_per_session):
-                result = await send_report(client, entity, reason, msg_text, msg_id=msg_id)
-                status = f"[{idx}:{rpt+1}]"
-                if result is True:
-                    print(Fore.GREEN + f"{status} ✅ Report sent from {name}")
-                    success += 1
-                elif result == "flood":
-                    print(Fore.YELLOW + f"{status} ⚠️ Flood limit hit from {name}")
-                    flood += 1
+async def connect_sessions(proxies, required_count):
+    """Connect to existing session files with SOCKS5 proxy support."""
+    session_files = get_session_files()
+    if not session_files:
+        logger.error("No session files found!")
+        return []
+    
+    connected_clients = []
+    
+    for i, session_file in enumerate(session_files[:required_count]):
+        session_name = os.path.splitext(os.path.basename(session_file))[0]
+        
+        for retry in range(5):
+            proxy = None
+            if proxies:
+                proxy_info = proxies[(i + retry) % len(proxies)]
+                proxy = (socks.SOCKS5, proxy_info[0], proxy_info[1])
+                if proxy_info[2] and proxy_info[3]:  # username and password provided
+                    proxy = proxy + (True, proxy_info[2], proxy_info[3])
+            
+            try:
+                client = TelegramClient(
+                    session_file,
+                    API_ID,
+                    API_HASH,
+                    proxy=proxy
+                )
+                
+                await client.connect()
+                
+                if await client.is_user_authorized():
+                    logger.info(f"Connected to session: {session_name} using SOCKS5 Proxy: {proxy}")
+                    connected_clients.append(client)
+                    break
                 else:
-                    print(Fore.RED + f"{status} ❌ Failed from {name}")
-                    failed += 1
-            await client.disconnect()
-        except Exception as e:
-            print(Fore.RED + f"[{idx}] ❌ Client error {e}")
-            failed += 1
+                    logger.warning(f"Session {session_name} not authorized. Skipping.")
+                    await client.disconnect()
+                    break
+                    
+            except Exception as e:
+                logger.warning(f"Proxy issue for session {session_name}: {proxy}. Retrying... ({retry + 1}/5)")
+                if retry == 4:
+                    logger.error(f"Failed to connect session {session_name} after 5 retries")
+    
+    return connected_clients
 
-    total_attempts = len(sessions) * report_per_session
-    print(Style.BRIGHT + "\n📊 Final Report Summary:")
-    print(Fore.GREEN + f"✅ Successful: {success}")
-    print(Fore.YELLOW + f"⚠️  FloodWaits:  {flood}")
-    print(Fore.RED + f"❌ Failed:     {failed}")
-    print(Fore.CYAN + f"🧮 Total Attempts: {total_attempts}")
-    print(Fore.GREEN + "\n🎯 Done.\n")
+
+async def report_entity(client, entity, reason, times_to_report, message, msg_id=None):
+    """Report a peer or specific message."""
+    try:
+        if reason not in REPORT_REASONS:
+            logger.error(f"Invalid report reason: {reason}")
+            return 0
+
+        entity_peer = await client.get_input_entity(entity)
+        successful_reports = 0
+
+        for _ in range(times_to_report):
+            try:
+                if msg_id:
+                    result = await client(ReportRequest(
+                        peer=entity_peer,
+                        id=[msg_id],
+                        reason=REPORT_REASONS[reason],
+                        message=message
+                    ))
+                else:
+                    result = await client(ReportPeerRequest(
+                        peer=entity_peer,
+                        reason=REPORT_REASONS[reason],
+                        message=message
+                    ))
+
+                if result:
+                    successful_reports += 1
+                    logger.info(f"[✓] Reported {entity} {'message' if msg_id else 'peer'} for {reason}.")
+                else:
+                    logger.warning(f"[✗] Failed to report {entity}.")
+            except Exception as e:
+                logger.error(f"Error during report attempt for {entity}: {str(e)}")
+
+        return successful_reports
+
+    except Exception as e:
+        logger.error(f"Failed to report {entity}: {str(e)}")
+        return 0
+
+
+async def main():
+    print("\n=== Telegram Multi-Account Reporter (SOCKS5 + Session Files) ===\n")
+    
+    # Load available session files
+    session_files = get_session_files()
+    if not session_files:
+        print("[✗] No session files found in 'sessions' directory!")
+        return
+    
+    print(f"[✓] Found {len(session_files)} session files")
+    
+    account_count = int(input(f"Enter the number of accounts to use (max {len(session_files)}): "))
+    account_count = min(account_count, len(session_files))
+    
+    # Load SOCKS5 proxies
+    proxies = load_socks5_proxies()
+    if proxies:
+        print(f"[✓] Loaded {len(proxies)} SOCKS5 proxies")
+    else:
+        print("[!] No proxies loaded, connecting without proxy")
+    
+    # Connect to sessions
+    clients = await connect_sessions(proxies, account_count)
+    
+    if not clients:
+        print("[✗] No clients could be connected!")
+        return
+    
+    print(f"[✓] Successfully connected {len(clients)} clients")
+
+    print("\nSelect what you want to report:")
+    print("1 - Group")
+    print("2 - Channel")
+    print("3 - User")
+    print("4 - Specific message in a chat")
+    choice = int(input("Enter your choice (1/2/3/4): "))
+
+    if choice == 4:
+        entity = input("Enter the chat username or ID: ").strip()
+        msg_id = int(input("Enter the message ID to report: "))
+    else:
+        entity = input("Enter the group/channel username or user ID to report: ").strip()
+        msg_id = None
+
+    print("\nAvailable reasons for reporting:")
+    for idx, reason in enumerate(REPORT_REASONS.keys(), 1):
+        print(f"{idx} - {reason.capitalize()}")
+    reason_choice = int(input("Enter your choice: "))
+    reason = list(REPORT_REASONS.keys())[reason_choice - 1]
+
+    times_to_report = int(input("Enter how many times each account should report: "))
+    message = input("Enter custom report message: ").strip()
+
+    # Execute reporting
+    tasks = [
+        report_entity(client, entity, reason, times_to_report, message, msg_id=msg_id)
+        for client in clients
+    ]
+    results = await asyncio.gather(*tasks)
+    total_successful_reports = sum(results)
+
+    print(f"\n[✓] Total successful reports submitted: {total_successful_reports}")
+
+    # Disconnect all clients
+    for client in clients:
+        await client.disconnect()
+
 
 if __name__ == "__main__":
-    asyncio.run(main_menu())
-    
+    asyncio.run(main())
+
