@@ -133,15 +133,13 @@ async def report_entity(client, entity, reason, times_to_report, message, msg_id
         for _ in range(times_to_report):
             try:
                 if msg_id:
-                # First fetch the message to get the sender as participant
-                msg = await client.get_messages(target, ids=msg_id)
-                sender = await client.get_input_entity(msg.sender_id)
-
-                # Report that specific message in the context of the channel
-                await client(functions.channels.ReportSpamRequest(
-                    channel=target,
-                    participant=sender,
-                    id=[msg_id]
+                    msg = await client.get_messages(target, ids=msg_id)
+                    sender = await client.get_input_entity(msg.sender_id)
+                    
+                    await client(functions.channels.ReportSpamRequest(
+                        channel=target,
+                        participant=sender,
+                        id=[msg_id]
                     ))
     
                 else:
