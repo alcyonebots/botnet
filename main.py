@@ -133,12 +133,14 @@ async def report_entity(client, entity, reason, times_to_report, message, msg_id
         for _ in range(times_to_report):
             try:
                 if msg_id:
+                    option = bytes(REPORT_REASONS[reason])
                     result = await client(ReportRequest(
-                        peer=entity_peer,
-                        id=[msg_id],
-                        reason=REPORT_REASONS[reason],
-                        message=message
+                        entity_peer,          # positional peer
+                        [msg_id],             # positional id list
+                        option,               # positional option (reason bytes)
+                        message               # positional message
                     ))
+    
                 else:
                     result = await client(ReportPeerRequest(
                         peer=entity_peer,
